@@ -7,7 +7,7 @@ export const CURRENT_API_VERSION = '2026-03-01';
 export const SUPPORTED_API_VERSIONS = ['2026-03-01', '2026-02-10'];
 
 export const PLAN_LIMITS = {
-  free: { write: 60, read: 120 },
+  free: { write: 30, read: 120 },
   team: { write: 600, read: 1200 },
   business: { write: 3000, read: 6000 },
 };
