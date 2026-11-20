@@ -62,22 +62,13 @@ export async function verifyEndpointUrl(rawUrl, { allowPrivate = false, timeoutM
     throw new ApiError(422, 'endpoint_unreachable', 'The URL must resolve to a public address.');
   }
 
-  let response;
   try {
-    response = await fetch(url, {
+    await fetch(url, {
       method: 'HEAD',
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new ApiError(422, 'endpoint_unreachable', 'The URL did not answer a HEAD request.');
-  }
-
-  if (response.status < 200 || response.status >= 300) {
-    throw new ApiError(
-      422,
-      'endpoint_unreachable',
-      `The URL returned ${response.status} to a HEAD request.`,
-    );
   }
 }

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { verifyEndpointUrl, isPrivateAddress } from '../src/http/verifier.js';
 
 test('private address detection covers the usual ranges', () => {
@@ -30,4 +31,19 @@ test('a loopback address is rejected when private URLs are not allowed', async (
     () => verifyEndpointUrl('https://127.0.0.1/webhooks'),
     (error) => error.code === 'endpoint_unreachable' && /public/.test(error.message),
   );
+});
+
+test('a reachable URL is accepted when HEAD returns a non-2xx status', async () => {
+  const server = http.createServer((request, response) => {
+    response.writeHead(404);
+    response.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    await verifyEndpointUrl(`http://127.0.0.1:${port}/webhooks`, { allowPrivate: true });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

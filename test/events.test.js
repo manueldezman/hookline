@@ -75,7 +75,7 @@ test('an idempotency key with a different body returns a conflict', async () => 
     payload: { invoiceId: 'inv_other' },
   });
   assert.equal(response.status, 409);
-  assert.equal(response.body.error.code, 'idempotency_conflict');
+  assert.equal(response.body.error.code, 'duplicate_idempotency_key');
   await app.close();
 });
 

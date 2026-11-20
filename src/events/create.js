@@ -37,7 +37,7 @@ export function createEvent({
       if (existing.idempotency_hash !== idempotencyHash) {
         throw new ApiError(
           409,
-          'idempotency_conflict',
+          'duplicate_idempotency_key',
           'This idempotency key was used with a different body.',
         );
       }

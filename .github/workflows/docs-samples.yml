@@ -1,0 +1,30 @@
+name: Docs samples
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  samples:
+    name: samples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the docs
+        run: git clone --depth 1 https://github.com/manueldezman/hookline-docs.git docs-repo
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run the docs samples
+        env:
+          DOCS_REPO: docs-repo
+        run: node scripts/check-docs-samples.mjs

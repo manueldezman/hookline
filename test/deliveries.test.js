@@ -20,7 +20,7 @@ test('a successful delivery marks the delivery and the event', async () => {
   assert.equal(after.body.status, 'succeeded');
   assert.equal(after.body.response_status, 200);
   assert.equal(after.body.next_retry, null);
-  assert.equal(after.body.request_body.id, event.body.id);
+  assert.equal('request_body' in after.body, false);
 
   const retrieved = await call(app, 'GET', `/v2/events/${event.body.id}`);
   assert.equal(retrieved.body.status, 'delivered');

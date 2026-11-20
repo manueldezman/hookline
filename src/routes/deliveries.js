@@ -95,10 +95,7 @@ export default async function deliveriesRoutes(app) {
   app.get('/v2/deliveries/:id', async (request, reply) => {
     const row = app.store.getDelivery(request.params.id, request.account.id);
     if (!row) throw notFound();
-    const event = app.store.getEventRow(row.event_id);
-    const delivery = mapDelivery(row);
-    delivery.request_body = JSON.parse(event.envelope);
-    reply.send(delivery);
+    reply.send(mapDelivery(row));
   });
 
   app.post('/v2/deliveries/:id/replay', async (request, reply) => {
