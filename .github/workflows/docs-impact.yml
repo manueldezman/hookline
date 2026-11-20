@@ -1,0 +1,216 @@
+name: Docs impact
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: docs-impact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  impact:
+    name: impact
+    runs-on: ubuntu-latest
+    outputs:
+      count: ${{ steps.impact.outputs.count }}
+      pages: ${{ steps.impact.outputs.pages }}
+    steps:
+      - name: Check out the product
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect the changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed-files.txt
+          cat changed-files.txt
+
+      - name: Check out the docs
+        uses: actions/checkout@v4
+        with:
+          repository: manueldezman/hookline-docs
+          ref: main
+          path: docs-repo
+          persist-credentials: false
+
+      - name: Find the affected pages
+        id: impact
+        run: node scripts/docs-impact.mjs --changed-files changed-files.txt --docs docs-repo --json impact.json
+
+  draft:
+    name: draft
+    needs: impact
+    if: needs.impact.outputs.count != '0' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the product
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out the docs
+        uses: actions/checkout@v4
+        with:
+          repository: manueldezman/hookline-docs
+          ref: main
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          path: docs-repo
+
+      - name: Prepare the docs checkout
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PAGES_JSON: ${{ needs.impact.outputs.pages }}
+        run: |
+          mkdir -p docs-repo/.docs-impact
+          git diff "$BASE_SHA...$HEAD_SHA" > docs-repo/.docs-impact/product.diff
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > docs-repo/.docs-impact/changed-files.txt
+          printf '%s\n' "$PAGES_JSON" > docs-repo/.docs-impact/pages.json
+          sed "s/{{PR_NUMBER}}/${PR_NUMBER}/g" .github/docs-impact-prompt.md > docs-repo/.docs-impact/prompt.md
+          echo ".docs-impact/" >> docs-repo/.git/info/exclude
+          git -C docs-repo config user.name "github-actions[bot]"
+          git -C docs-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C docs-repo checkout -B "docs/product-pr-${PR_NUMBER}"
+
+      - name: Install OpenCode
+        run: curl -fsSL https://opencode.ai/v2/install | bash
+
+      - name: Configure OpenCode
+        run: |
+          mkdir -p "$HOME/.config/opencode"
+          printf '%s\n' '{
+            "$schema": "https://opencode.ai/config.json",
+            "model": "openrouter/baidu/ernie-5.5-flash-preview:free",
+            "permissions": [
+              { "action": "read", "resource": "*", "effect": "allow" },
+              { "action": "edit", "resource": "*", "effect": "allow" },
+              { "action": "glob", "resource": "*", "effect": "allow" },
+              { "action": "grep", "resource": "*", "effect": "allow" },
+              { "action": "shell", "resource": "*", "effect": "deny" },
+              { "action": "external_directory", "resource": "*", "effect": "deny" },
+              { "action": "webfetch", "resource": "*", "effect": "deny" },
+              { "action": "websearch", "resource": "*", "effect": "deny" },
+              { "action": "skill", "resource": "*", "effect": "deny" },
+              { "action": "subagent", "resource": "*", "effect": "deny" },
+              { "action": "question", "resource": "*", "effect": "deny" },
+              { "action": "execute", "resource": "*", "effect": "deny" }
+            ]
+          }' > "$HOME/.config/opencode/opencode.json"
+
+      - name: Run the docs agent
+        working-directory: docs-repo
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          opencode run --standalone --auto \
+            --model "openrouter/baidu/ernie-5.5-flash-preview:free" \
+            "$(cat .docs-impact/prompt.md)"
+
+      - name: Check the agent changes
+        id: diff
+        working-directory: docs-repo
+        run: |
+          if [ -z "$(git status --porcelain -- docs)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The agent made no docs changes." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git status --porcelain | grep -vE '^.. docs/'; then
+            echo "The agent changed files outside docs/." >&2
+            exit 1
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: docs-repo/package-lock.json
+
+      - name: Install docs dependencies
+        if: steps.diff.outputs.changed == 'true'
+        working-directory: docs-repo
+        run: npm ci
+
+      - name: Install Vale
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          curl -fsSL "https://github.com/errata-ai/vale/releases/download/v3.26.0/vale_3.26.0_Linux_64-bit.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin vale
+
+      - name: Install codespell
+        if: steps.diff.outputs.changed == 'true'
+        run: pip install codespell
+
+      - name: Run the docs checks
+        if: steps.diff.outputs.changed == 'true'
+        working-directory: docs-repo
+        run: |
+          vale sync
+          npm run check:api
+          npm run check:frontmatter
+          npm test
+          vale docs
+          codespell docs README.md
+          npm run build
+          npm run validate
+
+      - name: Commit and push the docs branch
+        if: steps.diff.outputs.changed == 'true'
+        working-directory: docs-repo
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git add docs
+          git commit -m "Update docs for product PR #${PR_NUMBER}"
+          git push --force origin "HEAD:docs/product-pr-${PR_NUMBER}"
+
+      - name: Open or update the docs pull request
+        id: docs-pr
+        if: steps.diff.outputs.changed == 'true'
+        working-directory: docs-repo
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_REPO_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BRANCH="docs/product-pr-${PR_NUMBER}"
+          URL=$(gh pr list --repo manueldezman/hookline-docs --head "$BRANCH" --state open --json url --jq '.[0].url')
+          if [ -z "$URL" ]; then
+            URL=$(gh pr create \
+              --repo manueldezman/hookline-docs \
+              --base main \
+              --head "$BRANCH" \
+              --title "Docs for product PR #${PR_NUMBER}" \
+              --body "Updates the docs pages affected by manueldezman/hookline#${PR_NUMBER}.")
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Docs pull request is at $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the docs pull request link
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DOCS_PR_URL: ${{ steps.docs-pr.outputs.url }}
+        run: gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Docs pull request is ready at $DOCS_PR_URL."
+
+      - name: Comment that the docs already match
+        if: steps.diff.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "The affected docs pages already match this change."
