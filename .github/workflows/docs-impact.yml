@@ -112,7 +112,7 @@ jobs:
       - name: Run the docs agent
         working-directory: docs-repo
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENPROUTER_KEY }}
         run: |
           opencode run --standalone --auto \
             --model "openrouter/baidu/ernie-5.5-flash-preview:free" \
