@@ -10,8 +10,8 @@ import { loadConfig } from '../src/config.js';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DOCS_REPO = path.resolve(process.env.DOCS_REPO ?? path.join(ROOT, '..', 'hookline'));
-const TEST_KEY = 'hl_test_samples';
-const LIVE_KEY = 'hl_live_samples';
+const TEST_KEY = 'hl_test_examples';
+const LIVE_KEY = 'hl_live_examples';
 const failures = [];
 
 function fail(message) {
@@ -27,11 +27,11 @@ async function writeSummary(fatal) {
   const file = process.env.GITHUB_STEP_SUMMARY;
   if (!file) return;
 
-  const lines = ['## Docs samples', ''];
+  const lines = ['## Docs examples', ''];
   if (fatal) lines.push(`Fatal error. ${fatal}`);
 
   if (failures.length === 0 && !fatal) {
-    lines.push('All docs samples match the product.');
+    lines.push('All docs examples match the product.');
   } else if (failures.length > 0) {
     lines.push(`${failures.length} failure(s).`);
     lines.push('');
@@ -350,7 +350,7 @@ async function checkCli({ baseUrl, receiverUrl, receiver }) {
 }
 
 async function main() {
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'hookline-samples-'));
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'hookline-examples-'));
   const receiver = createServer((request, response) => {
     if (request.method === 'POST') {
       let body = '';
@@ -452,7 +452,7 @@ async function main() {
       console.error(`\n${failures.length} failure(s)`);
       process.exitCode = 1;
     } else {
-      console.log('\nAll docs samples match the product.');
+      console.log('\nAll docs examples match the product.');
     }
   } finally {
     await app.close();

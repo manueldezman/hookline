@@ -4,9 +4,11 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 concurrency:
-  group: docs-impact-${{ github.event.pull_request.number }}
+  group: docs-impact-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -16,6 +18,9 @@ jobs:
   impact:
     name: impact
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     outputs:
       count: ${{ steps.impact.outputs.count }}
       pages: ${{ steps.impact.outputs.pages }}
@@ -27,8 +32,8 @@ jobs:
 
       - name: Collect the changed files
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
         run: |
           git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed-files.txt
           cat changed-files.txt
@@ -45,10 +50,32 @@ jobs:
         id: impact
         run: node scripts/docs-impact.mjs --changed-files changed-files.txt --docs docs-repo --json impact.json
 
+      - name: Comment the docs impact
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COUNT: ${{ steps.impact.outputs.count }}
+          PAGES_JSON: ${{ steps.impact.outputs.pages }}
+        run: |
+          if [ "$COUNT" = "0" ]; then
+            BODY=$(printf '%s\n' "<!-- docs-impact -->" "" "No docs page depends on the changed files.")
+          else
+            BULLETS=$(printf '%s\n' "$PAGES_JSON" | jq -r '.[] | "- `\(.file)` because `\(.reasons | join("`, `"))` changed."')
+            BODY=$(printf '%s\n' "<!-- docs-impact -->" "" "This PR affects the docs pages listed below. The docs draft opens after merge." "" "$BULLETS")
+          fi
+          COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- docs-impact -->")) | .id' | head -1)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" -f body="$BODY"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$BODY"
+          fi
+
   draft:
     name: draft
     needs: impact
-    if: needs.impact.outputs.count != '0' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' && needs.impact.outputs.count != '0'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,6 +85,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Resolve the product reference
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "product_ref=pull request #${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "branch=docs/product-pr-${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "title=docs: update pages for product PR #${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "issue=Related to manueldezman/hookline#${PR_NUMBER}." >> "$GITHUB_OUTPUT"
+          else
+            SHORT="${GITHUB_SHA::7}"
+            echo "pr=" >> "$GITHUB_OUTPUT"
+            echo "product_ref=commit ${SHORT}" >> "$GITHUB_OUTPUT"
+            echo "branch=docs/push-${SHORT}" >> "$GITHUB_OUTPUT"
+            echo "title=docs: update pages for commit ${SHORT}" >> "$GITHUB_OUTPUT"
+            echo "issue=Related to commit ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check out the docs
         uses: actions/checkout@v4
@@ -69,20 +117,21 @@ jobs:
 
       - name: Prepare the docs checkout
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.after }}
+          PRODUCT_REF: ${{ steps.ref.outputs.product_ref }}
+          BRANCH: ${{ steps.ref.outputs.branch }}
           PAGES_JSON: ${{ needs.impact.outputs.pages }}
         run: |
           mkdir -p docs-repo/.docs-impact
           git diff "$BASE_SHA...$HEAD_SHA" > docs-repo/.docs-impact/product.diff
           git diff --name-only "$BASE_SHA...$HEAD_SHA" > docs-repo/.docs-impact/changed-files.txt
           printf '%s\n' "$PAGES_JSON" > docs-repo/.docs-impact/pages.json
-          sed "s/{{PR_NUMBER}}/${PR_NUMBER}/g" .github/docs-impact-prompt.md > docs-repo/.docs-impact/prompt.md
+          sed "s|{{PRODUCT_REF}}|${PRODUCT_REF}|g" .github/docs-impact-prompt.md > docs-repo/.docs-impact/prompt.md
           echo ".docs-impact/" >> docs-repo/.git/info/exclude
           git -C docs-repo config user.name "github-actions[bot]"
           git -C docs-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C docs-repo checkout -B "docs/product-pr-${PR_NUMBER}"
+          git -C docs-repo checkout -B "$BRANCH"
 
       - name: Install OpenCode
         run: curl -fsSL https://opencode.ai/v2/install | bash
@@ -173,11 +222,12 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         working-directory: docs-repo
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PRODUCT_REF: ${{ steps.ref.outputs.product_ref }}
+          BRANCH: ${{ steps.ref.outputs.branch }}
         run: |
           git add docs
-          git commit -m "Update docs for product PR #${PR_NUMBER}"
-          git push --force origin "HEAD:docs/product-pr-${PR_NUMBER}"
+          git commit -m "Update docs for ${PRODUCT_REF}"
+          git push --force origin "HEAD:${BRANCH}"
 
       - name: Open or update the docs pull request
         id: docs-pr
@@ -185,32 +235,68 @@ jobs:
         working-directory: docs-repo
         env:
           GH_TOKEN: ${{ secrets.DOCS_REPO_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.ref.outputs.branch }}
+          TITLE: ${{ steps.ref.outputs.title }}
+          ISSUE: ${{ steps.ref.outputs.issue }}
+          PRODUCT_REF: ${{ steps.ref.outputs.product_ref }}
+          PAGES_JSON: ${{ needs.impact.outputs.pages }}
         run: |
-          BRANCH="docs/product-pr-${PR_NUMBER}"
+          BULLETS=$(printf '%s\n' "$PAGES_JSON" | jq -r --arg branch "$BRANCH" '.[] | "- Update [`\(.file)`](https://github.com/manueldezman/hookline-docs/blob/\($branch)/\(.file)) because `\(.reasons | join("`, `"))` changed."')
+          BODY=$(cat <<EOF
+          This PR updates the docs for the product change in ${PRODUCT_REF}.
+
+          ## Because
+
+          The product change affects the docs pages listed below. The docs must match the product behavior.
+
+          ## This PR
+
+          ${BULLETS}
+
+          ## Issue
+
+          ${ISSUE}
+
+          ## Additional Information
+
+          This PR was drafted by the docs agent from the product diff. The docs checks and the example check must pass before merge.
+
+          ## Pull Request Requirements
+
+          - [x] The docs checks pass.
+          - [ ] The example check passes on this PR.
+          - [ ] The preview build is reviewed.
+          - [ ] The docs match the product behavior.
+          EOF
+          )
           URL=$(gh pr list --repo manueldezman/hookline-docs --head "$BRANCH" --state open --json url --jq '.[0].url')
           if [ -z "$URL" ]; then
             URL=$(gh pr create \
               --repo manueldezman/hookline-docs \
               --base main \
               --head "$BRANCH" \
-              --title "Docs for product PR #${PR_NUMBER}" \
-              --body "Updates the docs pages affected by manueldezman/hookline#${PR_NUMBER}.")
+              --title "$TITLE" \
+              --body "$BODY")
+          else
+            gh pr edit "$URL" --title "$TITLE" --body "$BODY"
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Docs pull request is at $URL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the docs pull request link
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.changed == 'true' && steps.ref.outputs.pr != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.ref.outputs.pr }}
+          PAGES_JSON: ${{ needs.impact.outputs.pages }}
           DOCS_PR_URL: ${{ steps.docs-pr.outputs.url }}
         run: |
-          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.body | contains("Docs pull request is ready at")) | .id' | head -1)
-          if [ -n "$EXISTING" ]; then
-            echo "The docs link is already in a comment."
-            exit 0
+          BULLETS=$(printf '%s\n' "$PAGES_JSON" | jq -r '.[] | "- `\(.file)` because `\(.reasons | join("`, `"))` changed."')
+          BODY=$(printf '%s\n' "<!-- docs-impact -->" "" "This PR affects the docs pages listed below. The docs draft is ready." "" "$BULLETS" "" "Docs pull request: $DOCS_PR_URL")
+          COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | contains("<!-- docs-impact -->")) | .id' | head -1)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" -f body="$BODY"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$BODY"
           fi
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Docs pull request is ready at $DOCS_PR_URL."

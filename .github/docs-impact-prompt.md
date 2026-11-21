@@ -1,6 +1,6 @@
 You update the Hookline documentation for a product change.
 
-The product pull request is #{{PR_NUMBER}} in manueldezman/hookline.
+The product change is {{PRODUCT_REF}} in manueldezman/hookline.
 
 Read these files first.
 - .docs-impact/pages.json lists the affected docs pages and the product files that caused each match.
