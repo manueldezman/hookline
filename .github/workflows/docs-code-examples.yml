@@ -1,4 +1,4 @@
-name: Docs examples
+name: Docs code examples
 
 on:
   workflow_dispatch:
@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  examples:
-    name: examples
+  code-examples:
+    name: code-examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Run the docs examples
+      - name: Run the docs code examples
         env:
           DOCS_REPO: docs-repo
-        run: node scripts/check-docs-examples.mjs
+        run: node scripts/check-docs-code-examples.mjs

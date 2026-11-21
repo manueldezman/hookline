@@ -27,11 +27,11 @@ async function writeSummary(fatal) {
   const file = process.env.GITHUB_STEP_SUMMARY;
   if (!file) return;
 
-  const lines = ['## Docs examples', ''];
+  const lines = ['## Docs code examples', ''];
   if (fatal) lines.push(`Fatal error. ${fatal}`);
 
   if (failures.length === 0 && !fatal) {
-    lines.push('All docs examples match the product.');
+    lines.push('All docs code examples match the product.');
   } else if (failures.length > 0) {
     lines.push(`${failures.length} failure(s).`);
     lines.push('');
@@ -350,7 +350,7 @@ async function checkCli({ baseUrl, receiverUrl, receiver }) {
 }
 
 async function main() {
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'hookline-examples-'));
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'hookline-code-examples-'));
   const receiver = createServer((request, response) => {
     if (request.method === 'POST') {
       let body = '';
@@ -452,7 +452,7 @@ async function main() {
       console.error(`\n${failures.length} failure(s)`);
       process.exitCode = 1;
     } else {
-      console.log('\nAll docs examples match the product.');
+      console.log('\nAll docs code examples match the product.');
     }
   } finally {
     await app.close();

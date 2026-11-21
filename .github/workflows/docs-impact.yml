@@ -259,12 +259,12 @@ jobs:
 
           ## Additional Information
 
-          This PR was drafted by the docs agent from the product diff. The docs checks and the example check must pass before merge.
+          This PR was drafted by the docs agent from the product diff. The docs checks and the code examples check must pass before merge.
 
           ## Pull Request Requirements
 
           - [x] The docs checks pass.
-          - [ ] The example check passes on this PR.
+          - [ ] The code examples check passes on this PR.
           - [ ] The preview build is reviewed.
           - [ ] The docs match the product behavior.
           EOF
