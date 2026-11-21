@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,26 @@ function fail(message) {
 
 function pass(message) {
   console.log(`ok   ${message}`);
+}
+
+async function writeSummary(fatal) {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (!file) return;
+
+  const lines = ['## Docs samples', ''];
+  if (fatal) lines.push(`Fatal error. ${fatal}`);
+
+  if (failures.length === 0 && !fatal) {
+    lines.push('All docs samples match the product.');
+  } else if (failures.length > 0) {
+    lines.push(`${failures.length} failure(s).`);
+    lines.push('');
+    for (const failure of failures) {
+      lines.push(`- ${failure.replace(/\n/g, ' ')}`);
+    }
+  }
+
+  await writeFile(file, `${lines.join('\n')}\n`);
 }
 
 function run(command, args, { env = {}, cwd = ROOT } = {}) {
@@ -426,6 +446,7 @@ async function main() {
     }
 
     await checkCli({ baseUrl, receiverUrl, receiver });
+    await writeSummary();
 
     if (failures.length > 0) {
       console.error(`\n${failures.length} failure(s)`);
@@ -444,5 +465,6 @@ try {
   await main();
 } catch (error) {
   console.error(`FAIL ${error.message}`);
+  await writeSummary(error.message);
   process.exitCode = 1;
 }
