@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-export const CURRENT_API_VERSION = '2026-03-01';
-export const SUPPORTED_API_VERSIONS = ['2026-03-01', '2026-02-10'];
+export const CURRENT_API_VERSION = '2026-04-01';
+export const SUPPORTED_API_VERSIONS = ['2026-04-01', '2026-03-01'];
 
 export const PLAN_LIMITS = {
   free: { write: 30, read: 120 },
