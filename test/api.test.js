@@ -32,14 +32,14 @@ test('account returns the id and default version', async () => {
   const response = await call(app, 'GET', '/v2/account');
   assert.equal(response.status, 200);
   assert.match(response.body.id, /^acct_/);
-  assert.equal(response.body.api_version, '2026-03-01');
+  assert.equal(response.body.api_version, '2026-04-01');
   await app.close();
 });
 
 test('a supported version header is accepted', async () => {
   const { app } = await makeApp();
   const response = await call(app, 'GET', '/v2/account', {
-    headers: { 'hookline-version': '2026-02-10' },
+    headers: { 'hookline-version': '2026-03-01' },
   });
   assert.equal(response.status, 200);
   await app.close();
