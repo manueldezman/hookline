@@ -180,6 +180,8 @@ jobs:
             echo "The agent changed files outside docs/." >&2
             exit 1
           fi
+          git diff --name-only -- docs > .docs-impact/changed-docs.txt
+          git ls-files --others --exclude-standard -- docs >> .docs-impact/changed-docs.txt
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node
@@ -239,15 +241,18 @@ jobs:
           TITLE: ${{ steps.ref.outputs.title }}
           ISSUE: ${{ steps.ref.outputs.issue }}
           PRODUCT_REF: ${{ steps.ref.outputs.product_ref }}
-          PAGES_JSON: ${{ needs.impact.outputs.pages }}
+          CHANGED_FILES: .docs-impact/changed-docs.txt
         run: |
-          BULLETS=$(printf '%s\n' "$PAGES_JSON" | jq -r --arg branch "$BRANCH" '.[] | "- Update [`\(.file)`](https://github.com/manueldezman/hookline-docs/blob/\($branch)/\(.file)) because `\(.reasons | join("`, `"))` changed."')
+          BULLETS=$(while IFS= read -r file; do
+            if [ -z "$file" ]; then continue; fi
+            printf -- '- Update [`%s`](https://github.com/manueldezman/hookline-docs/blob/%s/%s) because the product change makes it wrong.\n' "$file" "$BRANCH" "$file"
+          done < "$CHANGED_FILES")
           BODY=$(cat <<EOF
           This PR updates the docs for the product change in ${PRODUCT_REF}.
 
           ## Because
 
-          The product change affects the docs pages listed below. The docs must match the product behavior.
+          The product change makes the docs pages below wrong. The docs must match the product behavior.
 
           ## This PR
 
